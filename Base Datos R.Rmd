@@ -1,0 +1,116 @@
+---
+title: 'Tarea: Base de datos'
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Introducción
+
+En este notebook, utilizaremos **SQL en R** para realizar una exploración eficiente de una base de datos. Al integrar consultas SQL con R, aprovechamos la potencia de ambas herramientas: SQL para la gestión y consulta de grandes volúmenes de datos, y R para su análisis y visualización. 
+
+A lo largo de este notebook, realizaremos diversas consultas SQL para extraer información clave, filtrar datos, realizar agregaciones y crear subconjuntos de datos que luego serán analizados con R. Este enfoque facilitará el análisis de grandes cantidades de registros de manera más ágil y estructurada.
+
+En primer lugar, cargamos la librería necesaria para gestionar la base de datos desde R, llamada **RSQLite**. Esta librería nos permite interactuar con bases de datos SQLite directamente en R, facilitando la conexión y ejecución de consultas SQL. Con **RSQLite**, podemos cargar, explorar y analizar grandes conjuntos de datos almacenados en formato SQL de manera eficiente, lo que es esencial para el manejo de la base de datos de carpetas de investigación que utilizaremos en este análisis.
+
+```{r Connected,echo=FALSE}
+##Cargamos la librería para manejar la base de datos 
+library(RSQLite)
+##Se realiza la connexion de la base de datos 
+conn=dbConnect(RSQLite::SQLite(), ".sqlite")
+```
+
+En primer lugar, imprimimos los nombres de todas las tablas de nuestra base de datos:
+```{r}
+print(dbListTables(conn))
+```
+
+
+Luego, obtenemos el nombre de los productos y unidades en Stock de los productos que se encuentran descontinuados, mostrando únicamente los primeros 5 registros ordenados de mayor a menor por su valor en Stock.
+
+```{sql connection=conn, tab.cap ="Los 5 productos descontinuados con mayor Stock"}
+---Consulta para obtener el num. de unidaes en stock
+SELECT ProductName as 'Nombre del producto'
+,UnitsInStock as 'Unidades en Stock'
+FROM Product
+WHERE Discontinued==1
+ORDER BY UnitsInStock DESC LIMIT 5;
+```
+
+También, calculamos el total de ventas donde la venta es igual a: $$(PrecioUnitario-Descuento)*Cantidad$$
+
+```{sql connection=conn,max.print =1000,tab.cap="Total de ventas"}
+--Total de ventas por orden realizada
+SELECT OrderId,sum((UnitPrice-Discount)*Quantity) as 'Total de ventas'
+FROM OrderDetail
+GROUP BY OrderId;
+```
+
+
+
+En la siguiente consulta, mostramos el total de ventas por país de origen del cliente.
+
+```{sql connection=conn,max.print = 20,tab.cap="Ventas por país"}
+--Venta total por país de origen
+SELECT Customer.Country as 'País de origen del cliente',
+sum(OrderDetail.VentaTotal) as 'Total de ventas'
+FROM Orders
+INNER JOIN Customer ON Customer.Id=Orders.CustomerId
+---Calculo de la venta total por orden
+INNER JOIN (
+SELECT OrderId,sum((UnitPrice-Discount)*Quantity) as VentaTotal
+FROM OrderDetail
+GROUP BY OrderId) OrderDetail ON OrderDetail.OrderId=Orders.Id
+--Agrupamos por pais de origen del cliente
+GROUP BY Customer.Country 
+ORDER BY Customer.Country;
+```
+
+
+De igual manera, con el lenguaje SQL calculamos el total de descuento por categoría de producto y se ordena de manera descendente.
+
+```{sql connection=conn,tab.cap="Total de descuento por categoría"}
+-- Descuentos de los productos contenidos en cada categoría
+SELECT Product.CategoryId as 'Categoría',
+sum(Discount) as 'Total de descuento'
+FROM OrderDetail
+INNER JOIN Product ON Product.Id=OrderDetail.ProductId
+GROUP BY Product.CategoryId;
+```
+
+
+
+Por último, se realiza una consulta para conocer la demanda de los productos de los provedores de Españaa través de los meses. De manera que con la siguiente consulta **SQL** obtenemos la cantidad de producto vendido de acuerdo a su fecha de pedido.
+
+```{sql connection=conn,output.var="query"}
+--Obtenemos el año y el mes de cuando se realiza la orden
+SELECT strftime("%Y-%m", Orders.OrderDate) as YearMonth,
+--Calculamos la cantidad de productos vendidos
+sum(OrderDetail.Quantity) as 'Productos Vendidos'
+FROM Product
+INNER JOIN Supplier ON Supplier.Id=Product.SupplierId
+INNER JOIN OrderDetail ON OrderDetail.ProductId=Product.Id
+INNER JOIN Orders ON Orders.Id=OrderDetail.OrderId
+--Seleccionamos sólo los provedores de españa
+WHERE Country='Spain'
+--Agrupamos por mes
+GROUP BY YearMonth
+ORDER BY YearMonth ASC;
+```
+
+A continuación, mostramos la información de la consulta de manera gráfica.
+
+```{r,echo=FALSE,fig.height=5}
+price=ts(query$`Productos Vendidos`,frequency = 12,start = c(2012,7))
+ts.plot(price,col="blue",xlab="Fecha",ylab="Productos vendidos",
+        main="Demanda de los proveedores de España")
+```
+
+
+Para finalizar el proceso, es importante realizar la **desconexión de la base de datos** para liberar los recursos utilizados durante la sesión. Esto garantiza que no queden conexiones abiertas que puedan afectar el rendimiento o generar problemas en futuros accesos a la base de datos. Al cerrar correctamente la conexión, aseguramos que los cambios o consultas realizados durante el análisis se almacenen adecuadamente y evitamos posibles bloqueos o errores en el sistema.
+
+```{r Desconnected,echo=FALSE}
+##Se realiza la desconexión de la base de datos
+dbDisconnect(conn)
+```
+
